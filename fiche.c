@@ -48,11 +48,12 @@ $ cat fiche.c | nc localhost 9999
 #include <netinet/in.h>
 #include <netinet/in.h>
 
+#include <openssl/md5.h>
 
 /******************************************************************************
  * Various declarations
  */
-const char *Fiche_Symbols = "abcdefghijklmnopqrstuvwxyz0123456789";
+const char *Fiche_Symbols = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 
 /******************************************************************************
@@ -126,16 +127,6 @@ static void generate_slug(char **output, uint8_t length, uint8_t extra_length);
 
 
 /**
- * @brief Creates a directory at requested path using requested slug
- * @returns 0 if succeded, 1 if failed or dir already existed
- *
- * @arg output_dir root directory for all pastes
- * @arg slug directory name for a particular paste
- */
-static int create_directory(char *output_dir, char *slug);
-
-
-/**
  * @brief Saves data to file at requested path
  *
  * @arg data Buffer with data received from the user
@@ -196,15 +187,15 @@ void fiche_init(Fiche_Settings *settings) {
         // domain
         "example.com",
         // output dir
-        "code",
-	// listen_addr
-	"0.0.0.0",
+        "hdata",
+        // listen_addr
+        "0.0.0.0",
         // port
         9999,
         // slug length
-        4,
+        14,
         // https
-        false,
+        true,
         // buffer length
         32768,
         // user name
@@ -592,37 +583,9 @@ static void *handle_connection(void *args) {
     char *slug;
     uint8_t extra = 0;
 
-    do {
 
-        // Generate slugs until it's possible to create a directory
-        // with generated slug on disk
-        generate_slug(&slug, c->settings->slug_len, extra);
-
-        // Something went wrong in slug generation, break here
-        if (!slug) {
-            break;
-        }
-
-        // Increment counter for additional letters needed
-        ++extra;
-
-        // If i was incremented more than 128 times, something
-        // for sure went wrong. We are closing connection and
-        // killing this thread in such case
-        if (extra > 128) {
-            print_error("Couldn't generate a valid slug!");
-            print_separator();
-
-            // Cleanup
-            free(c);
-            free(slug);
-            close(c->socket);
-            pthread_exit(NULL);
-            return NULL;
-        }
-
-    }
-    while(create_directory(c->settings->output_dir_path, slug) != 0);
+    // TODO: Rewrite existing file check
+    generate_slug(&slug, c->settings->slug_len, extra);
 
 
     // Slug generation failed, we have to finish here
@@ -712,41 +675,21 @@ static void generate_slug(char **output, uint8_t length, uint8_t extra_length) {
 }
 
 
-static int create_directory(char *output_dir, char *slug) {
-    if (!slug) {
-        return -1;
-    }
-
-    // Additional byte is for the slash
-    size_t len = strlen(output_dir) + strlen(slug) + 2;
-
-    // Generate a path
-    char *path = malloc(len);
-    if (!path) {
-        return -1;
-    }
-    snprintf(path, len, "%s%s%s", output_dir, "/", slug);
-
-    // Create output directory, just in case
-    mkdir(output_dir, S_IRWXU | S_IRGRP | S_IROTH | S_IXOTH | S_IXGRP);
-
-    // Create slug directory
-    const int r = mkdir(
-        path,
-        S_IRWXU | S_IRGRP | S_IROTH | S_IXOTH | S_IXGRP
-    );
-
-    free(path);
-
-    return r;
-}
-
-
 static int save_to_file(const Fiche_Settings *s, uint8_t *data, char *slug) {
-    char *file_name = "index.txt";
+    // Compute MD5 hash of slug
+    unsigned char digest[16];
+    MD5_CTX context;
+    MD5_Init(&context);
+    MD5_Update(&context, slug, strlen(slug));
+    MD5_Final(digest, &context);
 
-    // Additional 2 bytes are for 2 slashes
-    size_t len = strlen(s->output_dir_path) + strlen(slug) + strlen(file_name) + 3;
+    char md5string[33];
+    for(int i = 0; i < 16; ++i) {
+        sprintf(&md5string[i*2], "%02x", (unsigned int)digest[i]);
+    }
+
+    // Additional 1 byte are for slash
+    size_t len = strlen(s->output_dir_path) + strlen(md5string) + 2;
 
     // Generate a path
     char *path = malloc(len);
@@ -754,7 +697,7 @@ static int save_to_file(const Fiche_Settings *s, uint8_t *data, char *slug) {
         return -1;
     }
 
-    snprintf(path, len, "%s%s%s%s%s", s->output_dir_path, "/", slug, "/", file_name);
+    snprintf(path, len, "%s%s%s", s->output_dir_path, "/", md5string);
 
     // Attempt file saving
     FILE *f = fopen(path, "w");
