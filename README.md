@@ -1,6 +1,6 @@
 # fiche with hastebin support
 
-Simple fork of [fiche](https://github.com/solusipse/fiche), mofidied for uploading to [hastebin](https://github.com/toptal/haste-server) data directories.
+Simple fork of [fiche](https://github.com/solusipse/fiche), modified for uploading to [hastebin](https://github.com/toptal/haste-server) data directories.
 
 Essentially hastebin uses md5 on the filenames, so that's what we do here.
 
